@@ -5,10 +5,9 @@ import { Plus, Sparkles, Trash2 } from 'lucide-react'
 type ProjectFormProps = {
   data: ResumeData['project']
   setProject: React.Dispatch<React.SetStateAction<ResumeData['project']>>
-  onSaveChanges: () => void
 }
 
-const ProjectForm = ({ data, setProject, onSaveChanges }: ProjectFormProps) => {
+const ProjectForm = ({ data, setProject }: ProjectFormProps) => {
 
   const addProject = () => {
     const newProject: Project = {
@@ -84,13 +83,6 @@ const ProjectForm = ({ data, setProject, onSaveChanges }: ProjectFormProps) => {
           />
         </div>
       ))}
-
-      <button
-        className='h-11 bg-gradient-to-br from-green-100 to-green-200 border border-green-300 text-green-600 hover:ring transition-all px-4 py-1.5 rounded-lg'
-        onClick={onSaveChanges}
-      >
-        Save Changes
-      </button>
     </div>
   )
 }

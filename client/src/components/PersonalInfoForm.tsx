@@ -7,7 +7,6 @@ import { User, Mail, Phone, MapPin, BriefcaseBusiness, Globe } from 'lucide-reac
 type PersonalInfoFormProps = {
   data: ResumeData['personal_info']
   onChange: (next: ResumeData['personal_info']) => void
-  onSaveChanges: () => void
   removeBackground: boolean
   // 要将setState作为Props传递给子组件时（该setState在父组件中定义）必须定义他的类型，可以鼠标悬停在setState上查看类型
   //Dispatch是派发器，用作接受一个动作并触发状态更新
@@ -17,7 +16,7 @@ type PersonalInfoFormProps = {
   setRemoveBackground: Dispatch<SetStateAction<boolean>>
 }
 
-function PersonalInfoForm({ data, onChange, onSaveChanges, removeBackground, setRemoveBackground }: PersonalInfoFormProps) {
+function PersonalInfoForm({ data, onChange, removeBackground, setRemoveBackground }: PersonalInfoFormProps) {
 
   const handleChange = (
     // 获取对象类型的所有键，并合并成一个联合类型
@@ -91,12 +90,6 @@ function PersonalInfoForm({ data, onChange, onSaveChanges, removeBackground, set
       })
 
       }
-      <button
-        className='mt-5 h-11 bg-gradient-to-br from-green-100 to-green-200 border border-green-300 text-green-600 hover:ring transition-all px-4 py-1.5 rounded-lg'
-        onClick={onSaveChanges}
-      >
-        Save Changes
-      </button>
     </div>
   )
 }

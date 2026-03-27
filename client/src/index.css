@@ -1,18 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
-
 @import "tailwindcss";
-/* import font from Google */
-*{
-  font-family: "Outfit", sans-serif;
+
+* {
+  font-family: Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
 
 @layer base {
-  button{
+  button {
     @apply cursor-pointer
   }
-  input:not([type="checkbox"]){
-    @apply outline-none focus:ring border border-gray-300 focus:border-blue-500 focus:border-blue-500 rounded-lg 
+
+  input:not([type="checkbox"]) {
+    @apply outline-none focus:ring border border-gray-300 focus:border-blue-500 focus:border-blue-500 rounded-lg
   }
+
   textarea {
     @apply outline-none focus:ring border border-gray-300 focus:ring-blue-500 focus:border-blue-500 rounded-lg resize-none;
   }

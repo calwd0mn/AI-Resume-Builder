@@ -1,34 +1,62 @@
-import { useEffect, useState, type SetStateAction } from 'react'
+import { Suspense, lazy, useEffect, useState, type SetStateAction } from 'react'
 import type { ResumeData } from '../assets/types'
 import { EMPTY_RESUME_DATA } from '../assets/types'
-import { dummyResumeData } from '../assets/assets'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeftIcon, Briefcase, ChevronLeft, ChevronRight, Divide, DownloadIcon, EyeIcon, EyeOffIcon, FileText, FolderIcon, GraduationCap, Share2Icon, Sparkles, User } from 'lucide-react'
-import PersonalInfoForm from '../components/PersonalInfoForm'
+import { ArrowLeftIcon, Briefcase, ChevronLeft, ChevronRight, FileText, FolderIcon, GraduationCap, Sparkles, User } from 'lucide-react'
 import ResumePreview from '../components/ResumePreview'
 import TemplateSelector from '../components/TemplateSelector'
 import ColorSeclector from '../components/ColorSeclector'
-import ProfessionSummaryForm from '../components/ProfessionSummaryForm'
-import ExperienceForm from '../components/ExperienceForm'
 import ActiveSectionContext from '../components/ActiveSectionContext'
-import EducationForm from '../components/EducationForm'
-import ProjectForm from '../components/ProjectForm'
-import SkillsForm from '../components/SkillsForm'
+import { useSelector } from 'react-redux'
+import type { RootState } from '../app/store'
+import api from '../configs/api'
+import axios from 'axios'
+import toast from 'react-hot-toast'
 
 type DraftKeys = 'professional_summary' | 'experience' | 'education' | 'project' | 'skills' | 'personal_info'
 //Partial<Pick<ResumeData, DraftKeys>> 表示 ResumeDrafts 是 ResumeData 的子集，且只包含 DraftKeys 中的键，partial将获取的属性变为可选属性
 type ResumeDrafts = Partial<Pick<ResumeData, DraftKeys>>
 
+const PersonalInfoForm = lazy(() => import('../components/PersonalInfoForm'))
+const ProfessionSummaryForm = lazy(() => import('../components/ProfessionSummaryForm'))
+const ExperienceForm = lazy(() => import('../components/ExperienceForm'))
+const EducationForm = lazy(() => import('../components/EducationForm'))
+const ProjectForm = lazy(() => import('../components/ProjectForm'))
+const SkillsForm = lazy(() => import('../components/SkillsForm'))
+
+
 const ResumeBuilder = () => {
   const resumeId = useParams<{ resumeId: string }>().resumeId
   const [resumeData, setResumeData] = useState<ResumeData>(EMPTY_RESUME_DATA)
+  const { token } = useSelector((state: RootState) => state.auth)
+  const normalizeResumeForUI = (raw: ResumeData): ResumeData => {
+    if (raw?.personal_info && typeof raw.personal_info !== 'string') {
+      return raw
+    }
 
+    const legacyImage = typeof (raw as any)?.personal_info === 'string'
+      ? (raw as any).personal_info
+      : ''
+
+    return {
+      ...raw,
+      personal_info: {
+        ...EMPTY_RESUME_DATA.personal_info,
+        image: legacyImage,
+      },
+    } as ResumeData
+  }
 
   const loadExistingResume = async (resumeId: string) => {
-    const resume = dummyResumeData.find(resume => resume.id === resumeId)
-    if (resume) {
-      setResumeData(resume)
-      document.title = resume.title
+    try {
+      const { data } = await api.get(`/api/resumes/get/${resumeId}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (data.resume) {
+        setResumeData(normalizeResumeForUI(data.resume))
+        document.title = data.resume.title;
+      }
+    } catch (error) {
+      const message = axios.isAxiosError(error) ? (error.response?.data?.message ?? error.message) : (error instanceof Error ? error.message : 'Request failed')
+      toast.error(message)
     }
   }
   const sections = [
@@ -44,12 +72,16 @@ const ResumeBuilder = () => {
   const [removeBackground, setremoveBackground] = useState<boolean>(false)
   const activeSection = sections[activeSectionIndex]
   const [drafts, setDrafts] = useState<ResumeDrafts>({})
+  const [isSaving, setIsSaving] = useState(false)
   /** 当前打开的 dropdown：'template' | 'color' | null，保证同一时间只开一个 */
   const [activeDropdown, setActiveDropdown] = useState<'template' | 'color' | null>(null)
 
   const setDraftField = <K extends keyof ResumeDrafts>(key: K, value: ResumeDrafts[K]) => {
     setDrafts(prev => ({ ...prev, [key]: value }))
   }
+
+
+
 
   const setDraftFieldWithUpdater = <K extends keyof ResumeDrafts>(
     key: K,
@@ -64,16 +96,44 @@ const ResumeBuilder = () => {
       return { ...prev, [key]: next }
     })
   }
+  /** 当前“真实数据 + 所有草稿”合并结果，与预览一致，用于上传 */
+  const getMergedResumeData = (): ResumeData => ({ ...resumeData, ...drafts } as ResumeData)
 
-  const saveDraftField = <K extends keyof ResumeDrafts>(key: K) => {
-    const value = drafts[key]
-    if (value === undefined) return
-    setResumeData(prev => ({ ...prev, [key]: value }))
-    setDrafts(prev => {
-      const copy = { ...prev }
-      delete copy[key]
-      return copy
-    })
+  /**
+   * 将简历数据持久化到后端。
+   * @param data 可选；不传则用当前 resumeData，传则用合并后的数据（用于 Save Changes 时带上草稿）
+   * @returns 是否保存成功
+   */
+  const saveResume = async (data?: ResumeData): Promise<boolean> => {
+    if (!resumeId) {
+      toast.error('简历 ID 不存在，无法保存')
+      return false
+    }
+    const toSave = data ?? resumeData
+    try {
+      const updatedResumeData = structuredClone(toSave) as ResumeData
+      // remove image from updatedResumeData
+      // 原因：JSON吞不下文件，如果image是一个File或者Blob对象，JSON解析后会变成一个空对象
+      if (typeof toSave.personal_info.image === 'object') {
+        delete updatedResumeData.personal_info.image
+      }
+      // FormData可以携带string和二进制文件
+      const formData = new FormData()
+      formData.append('resumeId', resumeId)
+      formData.append('resumeData', JSON.stringify(updatedResumeData))
+      if (removeBackground) formData.append('removeBackground', 'yes')
+      if (typeof toSave.personal_info.image === 'object' && toSave.personal_info.image instanceof File) {
+        formData.append('image', toSave.personal_info.image)
+      }
+      const { data: res } = await api.put('/api/resumes/update', formData, { headers: { Authorization: `Bearer ${token}` } })
+      setResumeData(normalizeResumeForUI(res.resume))
+      toast.success(res.message)
+      return true
+    } catch (error) {
+      const message = axios.isAxiosError(error) ? (error.response?.data?.message ?? error.message) : (error instanceof Error ? error.message : 'Request failed')
+      toast.error(message)
+      return false
+    }
   }
 
   const discardDraftField = <K extends keyof ResumeDrafts>(key: K) => {
@@ -102,6 +162,28 @@ const ResumeBuilder = () => {
     setactiveSectionIndex(nextIndex)
   }
 
+
+  const activeSectionDraftKeys = sectionDraftKeys[activeSection.id] ?? []
+  const hasDraftInActiveSection = activeSectionDraftKeys.some((key) => drafts[key] !== undefined)
+
+
+
+
+
+
+  /** Save Changes 按钮：先合并草稿再上传到数据库，成功则清空当前 section 草稿 */
+  const handleSaveChanges = async () => {
+    const merged = getMergedResumeData()
+    setIsSaving(true)
+    try {
+      const ok = await saveResume(merged)
+      if (ok) {
+        activeSectionDraftKeys.forEach((key) => discardDraftField(key))
+      }
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!resumeId) return
@@ -155,58 +237,63 @@ const ResumeBuilder = () => {
                 <hr className='border border-gray-200  mb-2' />
                 {/* Form */}
                 <div className='space-y-6'>
-                  {activeSection.id === 'personal' && (
-                    <PersonalInfoForm
-                      data={drafts.personal_info ?? resumeData.personal_info}
-                      onChange={(data) => setDraftField('personal_info', data)}
-                      onSaveChanges={() => saveDraftField('personal_info')}
-                      removeBackground={removeBackground}
-                      setRemoveBackground={setremoveBackground}
-                    />
-                  )}
-                  {activeSection.id === 'summary' && (
-                    <ProfessionSummaryForm
-                    summary={drafts.professional_summary ?? resumeData.professional_summary}
-                    onSummaryChange={(summary) => setDraftField('professional_summary', summary)}
-                    onSaveSummary={() => saveDraftField('professional_summary')}
-                    />
-                  )}
-                  {activeSection.id === 'experience' && (
-                    <ExperienceForm
-                      data={drafts.experience ?? resumeData.experience}
-                      setExperience={(updater) =>
-                        setDraftFieldWithUpdater('experience', updater, resumeData.experience)
-                      }
-                      onSaveChanges={() => saveDraftField('experience')}
-                    />
-                  )}
-                  {activeSection.id === 'education' && (
-                    <EducationForm
-                      data={drafts.education ?? resumeData.education}
-                      setEducation={(updater) =>
-                        setDraftFieldWithUpdater('education', updater, resumeData.education)
-                      }
-                      onSaveChanges={() => saveDraftField('education')}
-                    />
-                  )}
-                  {activeSection.id === 'projects' && (
-                    <ProjectForm
-                      data={drafts.project ?? resumeData.project}
-                      setProject={(updater) =>
-                        setDraftFieldWithUpdater('project', updater, resumeData.project)
-                      }
-                      onSaveChanges={() => saveDraftField('project')}
-                    />
-                  )}
-                  {activeSection.id === 'skills' && (
-                    <SkillsForm
-                      data={drafts.skills ?? resumeData.skills}
-                      setSkills={(updater) =>
-                        setDraftFieldWithUpdater('skills', updater, resumeData.skills)
-                      }
-                      onSaveChanges={() => saveDraftField('skills')}
-                    />
-                  )}
+                  <Suspense fallback={<div className='text-sm text-slate-500 py-3'>分区内容加载中...</div>}>
+                    {activeSection.id === 'personal' && (
+                      <PersonalInfoForm
+                        data={drafts.personal_info ?? resumeData.personal_info}
+                        onChange={(data) => setDraftField('personal_info', data)}
+                        removeBackground={removeBackground}
+                        setRemoveBackground={setremoveBackground}
+                      />
+                    )}
+                    {activeSection.id === 'summary' && (
+                      <ProfessionSummaryForm
+                        summary={drafts.professional_summary ?? resumeData.professional_summary}
+                        onSummaryChange={(summary) => setDraftField('professional_summary', summary)}
+                        setResumeData={(next) => setResumeData(next)}
+                      />
+                    )}
+                    {activeSection.id === 'experience' && (
+                      <ExperienceForm
+                        data={drafts.experience ?? resumeData.experience}
+                        setExperience={(updater) =>
+                          setDraftFieldWithUpdater('experience', updater, resumeData.experience)
+                        }
+                      />
+                    )}
+                    {activeSection.id === 'education' && (
+                      <EducationForm
+                        data={drafts.education ?? resumeData.education}
+                        setEducation={(updater) =>
+                          setDraftFieldWithUpdater('education', updater, resumeData.education)
+                        }
+                      />
+                    )}
+                    {activeSection.id === 'projects' && (
+                      <ProjectForm
+                        data={drafts.project ?? resumeData.project}
+                        setProject={(updater) =>
+                          setDraftFieldWithUpdater('project', updater, resumeData.project)
+                        }
+                      />
+                    )}
+                    {activeSection.id === 'skills' && (
+                      <SkillsForm
+                        data={drafts.skills ?? resumeData.skills}
+                        setSkills={(updater) =>
+                          setDraftFieldWithUpdater('skills', updater, resumeData.skills)
+                        }
+                      />
+                    )}
+                  </Suspense>
+                  <button
+                    className='w-full h-11 bg-gradient-to-br from-green-100 to-green-200 border border-green-300 text-green-600 hover:ring transition-all px-4 py-1.5 rounded-lg disabled:opacity-60 disabled:cursor-not-allowed'
+                    onClick={handleSaveChanges}
+                    disabled={!hasDraftInActiveSection || isSaving}
+                    type='button'
+                  >
+                    {isSaving ? '保存中…' : '保存更改'}
+                  </button>
                 </div>
 
 
@@ -221,13 +308,9 @@ const ResumeBuilder = () => {
             </div>
           </div>
         </div>
+
       </div>
     </ActiveSectionContext.Provider>
-
   )
 }
-
-
-
-
 export default ResumeBuilder

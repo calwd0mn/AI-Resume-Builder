@@ -1,6 +1,5 @@
 import { FilePenLineIcon, PencilIcon, PlusIcon, TrashIcon, UploadCloudIcon, XIcon } from 'lucide-react'
 import React, { useEffect, useState } from 'react'
-import { dummyResumeData } from '../assets/assets'
 import type { ResumeData } from '../assets/types'
 import { useNavigate } from 'react-router-dom'
 import { useSelector } from 'react-redux'
@@ -8,7 +7,7 @@ import type { RootState } from '../app/store'
 import api from '../configs/api'
 import toast from 'react-hot-toast'
 import axios from 'axios'
-import { extractTextFromPdfWithOcrFallback } from '../utils/pdfOcr'
+
 
 const Dashboard = () => {
 
@@ -25,8 +24,19 @@ const Dashboard = () => {
 
   const navigate = useNavigate()
 
+  const normalizeResume = (resume: any): ResumeData => ({
+    ...resume,
+    id: resume?.id || resume?._id || '',
+  })
+
   const loadAllResumes = async () => {
-    setAllResumes(dummyResumeData)
+    try {
+      const { data } = await api.get('/api/users/resumes', { headers: { Authorization: `Bearer ${token}` } })
+      setAllResumes((data.resumes || []).map(normalizeResume))
+    } catch (error) {
+      const message = axios.isAxiosError(error) ? (error.response?.data?.message ?? error.message) : (error instanceof Error ? error.message : 'Request failed')
+      toast.error(message)
+    }
   }
   // 此处复习一下useEffect，useEffect会在组件挂载后执行，相当于componentDidMount
   // 第二个参数是依赖项，如果不选则每次组件渲染都会执行，如果选则只有依赖项发生变化时才会执行，此处我们用空数组表示只执行一次
@@ -38,8 +48,8 @@ const Dashboard = () => {
   const createResume: React.SubmitEventHandler<HTMLFormElement> = async (event) => {
     try {
       event.preventDefault()
-      const { data } = await api.post('api/resumes/create', { title }, { headers: { Authorization: `Bearer ${token}` } })
-      setAllResumes([...allResumes, data.resume])
+      const { data } = await api.post('/api/resumes/create', { title }, { headers: { Authorization: `Bearer ${token}` } })
+      setAllResumes([...allResumes, normalizeResume(data.resume)])
       setTitle('')
       setShowCreateResume(false)
       navigate(`/app/builder/${data.resume._id}`)
@@ -52,52 +62,98 @@ const Dashboard = () => {
   const uploadResume: React.SubmitEventHandler<HTMLFormElement> = async (e) => {
     e.preventDefault();
     setIsLoading(true);
+
+    // 使用唯一的 ID 管理 Toast，避免堆叠
+    const STATUS_TOAST_ID = 'resume-status';
+
     try {
-      if (!resumeFile) {
-        toast.error('Please select a resume file')
-        return
-      }
-      if (!title.trim()) {
-        toast.error('Please enter a resume title')
-        return
+      if (!resumeFile || !title.trim()) {
+        toast.error('请填写标题并上传简历文件');
+        setIsLoading(false);
+        return;
       }
 
+      // 1. PDF 提取阶段
+      toast.loading('正在读取 PDF 内容...', { id: STATUS_TOAST_ID });
+      const { extractTextFromPdfWithOcrFallback } = await import('../utils/pdfOcr');
       const { text: resumeText, usedOcr } = await extractTextFromPdfWithOcrFallback(resumeFile, () => {
-        toast.loading('正在使用 OCR 识别扫描版简历，请稍候…', { id: 'pdf-ocr' })
-      })
-      toast.dismiss('pdf-ocr')
+        toast.loading('正在进行 OCR 识别，这可能需要较长时间...', { id: STATUS_TOAST_ID });
+      });
+
       if (!resumeText.trim()) {
-        toast.error('无法从该 PDF 提取文字，请使用可选中文字的 PDF 或清晰的扫描件。')
-        return
+        toast.error('无法提取文字，请确保 PDF 不是受保护的加密文件', { id: STATUS_TOAST_ID });
+        return;
       }
-      if (usedOcr) toast.success('已通过 OCR 识别扫描版简历')
-      const { data } = await api.post('api/ai/upload-resume', { resumeText: resumeText.trim(), title }, { headers: { Authorization: `Bearer ${token}` } })
-      setTitle('')
-      setResumeFile(null)
-      setShowUploadResume(false)
-      navigate(`/app/builder/${data.resumeId}`)
+
+      // 2. API 调用阶段
+      toast.loading(usedOcr ? 'OCR 已完成，正在由 AI 深度解析...' : '正在解析简历结构...', { id: STATUS_TOAST_ID });
+
+      const { data } = await api.post(
+        '/api/ai/upload-resume',
+        { resumeText: resumeText.trim(), title },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 60000 // 客户端显式设置 60s 超时
+        }
+      );
+
+      toast.success('简历解析成功！正在进入编辑器...', { id: STATUS_TOAST_ID });
+
+      // 清理并跳转
+      setTitle('');
+      setResumeFile(null);
+      setShowUploadResume(false);
+      navigate(`/app/builder/${data.resumeId}`);
+
     } catch (error) {
-      const message = axios.isAxiosError(error) ? (error.response?.data?.message ?? error.message) : (error instanceof Error ? error.message : 'Request failed')
-      toast.error(message)
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const serverMessage = error.response?.data?.message;
+
+        if (error.code === 'ECONNABORTED' || status === 504) {
+          toast.error('AI 解析耗时过长。建议尝试：1.删除简历中的图片或装饰文字 2.手动复制文本上传。', { id: STATUS_TOAST_ID, duration: 5000 });
+        } else if (status === 413) {
+          toast.error('简历内容超出长度限制，请上传精简后的版本。', { id: STATUS_TOAST_ID });
+        } else {
+          toast.error(serverMessage || '解析失败，请检查文件内容或重试。', { id: STATUS_TOAST_ID });
+        }
+      } else {
+        toast.error('发生未知错误，请刷新页面重试', { id: STATUS_TOAST_ID });
+      }
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
   };
 
 
   const editTitle: React.SubmitEventHandler<HTMLFormElement> = async (event) => {
-    event.preventDefault()
-    setAllResumes(allResumes.map(resume => resume.id === editResumeId ? { ...resume, title: title } : resume))
-    setEditResumeId('')
-    setTitle('')
+    try {
+      event.preventDefault()
+      const { data } = await api.put('/api/resumes/update', { resumeId: editResumeId, title }, { headers: { Authorization: `Bearer ${token}` } })
+      setAllResumes(allResumes.map(resume => resume.id === editResumeId ? { ...resume, title: title } : resume))
+      setEditResumeId('')
+      setTitle('')
+      toast.success(data.message)
+    } catch (error) {
+      const message = axios.isAxiosError(error) ? (error.response?.data?.message ?? error.message) : (error instanceof Error ? error.message : 'Request failed')
+      toast.error(message)
+    }
+
   }
   const deleteResume = async (resumeId: string) => {
     // 添加确认窗口
-    const confirm = window.confirm('Are you sure you want to delete this resume?')
-    if (confirm) {
-      // 此处复习一下filter方法，filter方法会返回一个新数组，新数组中的元素是原数组中满足条件的元素
-      // 在React中，元素更新靠的是浅比较，即比较地址，所以我们要通过返回新数组的方式进行数据的修改触发渲染
-      setAllResumes(allResumes.filter(resume => resume.id !== resumeId))
+    try {
+      const confirm = window.confirm('Are you sure you want to delete this resume?')
+      if (confirm) {
+        const { data } = await api.delete(`/api/resumes/delete/${resumeId}`, { headers: { Authorization: `Bearer ${token}` } })
+        // 此处复习一下filter方法，filter方法会返回一个新数组，新数组中的元素是原数组中满足条件的元素
+        // 在React中，元素更新靠的是浅比较，即比较地址，所以我们要通过返回新数组的方式进行数据的修改触发渲染
+        setAllResumes(allResumes.filter(resume => resume.id !== resumeId))
+        toast.success(data.message)
+      }
+    } catch (error) {
+      const message = axios.isAxiosError(error) ? (error.response?.data?.message ?? error.message) : (error instanceof Error ? error.message : 'Request failed')
+      toast.error(message)
     }
   }
   return (
@@ -189,11 +245,12 @@ const Dashboard = () => {
           }
           {editResumeId && (
             <form onSubmit={editTitle} onClick={() => setEditResumeId('')} className='fixed inset-0 bg-black/70 backdrop-blur bg-opacity-50 z-10 flex items-center justify-center'>
-              <div onClick={e => e.stopPropagation()} className='relative w-full max-w-sm bg-slate-50 rounded-lg p-6'>
-                <h2 className='text-xl font-boldd mb-4'>Edit Resume Title</h2>
-                <input onChange={(e) => setTitle(e.target.value)} value={title} type="text" placeholder='Enter Resume Title' className='w-full px-4 py-2 mb-4 border border-slate-200 rounded focus:ring-2 focus:border-green-600 focus:ring-green-600/50 outline-none' required />
-                <button className='w-full py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors'>Edit Title</button>
-                <XIcon className='absolute top-4 right-4 cursor-pointer text-slate-400 hover:text-slate-600 transition-colors' onClick={() => { setEditResumeId(''); setTitle(''); setResumeFile(null) }} />
+              <div onClick={e => e.stopPropagation()} className='relative bg-slate-50 border shadow-md rounded-lg w-full max-w-sm p-6'>
+                <h2 className='text-xl font-bold mb-4'>Edit Resume Title</h2>
+                <input onChange={(e) => setTitle(e.target.value)} value={title} type="text" placeholder='Enter resume title' className='w-full px-4 py-2 mb-4 focus:border-green-600 ring-green-600' required />
+
+                <button className='w-full py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors'>Update</button>
+                <XIcon className='absolute top-4 right-4 text-slate-400 hover:text-slate-600 cursor-pointer transition-colors' onClick={() => { setEditResumeId(''); setTitle('') }} />
               </div>
             </form>
           )

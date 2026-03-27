@@ -1,7 +1,5 @@
-import React from 'react'
-
 interface TitleProps {
-  title: string 
+  title: string
   description: string
 }
 const Title = (props: TitleProps) => {

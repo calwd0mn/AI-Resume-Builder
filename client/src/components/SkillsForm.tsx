@@ -5,10 +5,9 @@ import { Plus, Sparkles, X } from 'lucide-react'
 type SkillsFormProps = {
   data: ResumeData['skills']
   setSkills: React.Dispatch<React.SetStateAction<ResumeData['skills']>>
-  onSaveChanges: () => void
 }
 
-const SkillsForm = ({ data, setSkills, onSaveChanges }: SkillsFormProps) => {
+const SkillsForm = ({ data, setSkills }: SkillsFormProps) => {
   const [input, setInput] = useState('')
 
   const addSkill = () => {
@@ -82,13 +81,6 @@ const SkillsForm = ({ data, setSkills, onSaveChanges }: SkillsFormProps) => {
           Add 8-12 relevant skills. Include both technical skills (programming languages, tools) and soft skills (leadership, communication).
         </p>
       </div>
-
-      <button
-        className='h-11 bg-gradient-to-br from-green-100 to-green-200 border border-green-300 text-green-600 hover:ring transition-all px-4 py-1.5 rounded-lg'
-        onClick={onSaveChanges}
-      >
-        Save Changes
-      </button>
     </div>
   )
 }

@@ -2,39 +2,265 @@ import { AuthRequest } from "../middlewares/authMiddleware";
 import { Response } from "express";
 import { ai } from "../configs/ai.js";
 import Resume from "../modules/Resume";
+import { JOB_DESC_SYSTEM_PROMPT, SUMMARY_SYSTEM_PROMPT } from "../prompts/aiPrompts.js";
+
+const MAX_RESUME_TEXT_LENGTH = 16000;
+
+const MAX_PRO_SUMMARY_INPUT_LENGTH = 800;
+const PRO_SUMMARY_TIMEOUT_MS = Number(process.env.PRO_SUMMARY_TIMEOUT_MS || 155000);
+const PRO_SUMMARY_MAX_TOKENS = Number(process.env.PRO_SUMMARY_MAX_TOKENS || 140);
+const JOB_DESC_TIMEOUT_MS = Number(process.env.JOB_DESC_TIMEOUT_MS || 55000);
+const UPLOAD_RESUME_TIMEOUT_MS = Number(process.env.UPLOAD_RESUME_TIMEOUT_MS || 90000);
+
+const getTraceId = (req: AuthRequest): string => {
+  const traceId = req.headers['x-trace-id'];
+  if (Array.isArray(traceId)) {
+    return traceId[0] || 'trace-missing';
+  }
+  return traceId || 'trace-missing';
+};
+
+const normalizeSummaryInput = (input: string): string => {
+  return input
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^enhance my professional summary:\s*/i, '')
+    .trim()
+    .slice(0, MAX_PRO_SUMMARY_INPUT_LENGTH);
+};
+
+const buildSummaryFallback = (input: string): string => {
+  const cleaned = normalizeSummaryInput(input);
+  if (!cleaned) {
+    return 'Results-driven professional with strong execution and collaboration skills, focused on delivering measurable impact.';
+  }
+
+  const sentenceSegments = cleaned
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  let summary = sentenceSegments.slice(0, 2).join(' ');
+  if (!summary) {
+    summary = cleaned;
+  }
+
+  if (summary.length < 70) {
+    summary = `${summary} Brings strong ownership, communication, and continuous improvement mindset.`;
+  }
+
+  return summary.slice(0, 320);
+};
+
+const isAiTimeoutError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const err = error as { code?: string; status?: number; name?: string; message?: string };
+  const message = String(err.message || '').toLowerCase();
+  return (
+    err.code === 'ETIMEDOUT' ||
+    err.code === 'ECONNABORTED' ||
+    err.status === 408 ||
+    err.status === 504 ||
+    err.name === 'AbortError' ||
+    err.name === 'APIConnectionTimeoutError' ||
+    err.name === 'TimeoutError' ||
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('request timed out') ||
+    message.includes('deadline exceeded')
+  );
+};
+
+const prepareResumeTextForExtraction = (input: string): string => {
+  return input
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, MAX_RESUME_TEXT_LENGTH);
+};
+
+const writeSseHeaders = (res: Response) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');// 禁止缓存和转换
+  res.setHeader('Connection', 'keep-alive');// 不要掐断
+  res.setHeader('X-Accel-Buffering', 'no');// 禁止Nginx缓存（为后续部署在服务器时考虑）
+  if (typeof (res as any).flushHeaders === 'function') {
+    (res as any).flushHeaders();// 把头先返回去
+  }
+};
+
+const sendSseEvent = (res: Response, event: 'chunk' | 'done' | 'error', payload: Record<string, unknown>) => {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+};
+
+const bindAbortOnDisconnect = (req: AuthRequest, res: Response, controller: AbortController) => {
+  // IncomingMessage "close" may fire after body is consumed; avoid aborting healthy streams.
+  req.on('aborted', () => controller.abort());
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      controller.abort();
+    }
+  });
+};
 
 // controller for enhanceing a resume's professional summary
 // POST: /api/ai/enhance-pro-sum
 export const enhanceProfessionalSummary = async (req: AuthRequest, res: Response) => {
+  const traceId = getTraceId(req);
+  const { userContent } = req.body;
+  const safeContent = normalizeSummaryInput(String(userContent || ''));
+  const fallbackSummary = buildSummaryFallback(safeContent);
+  const logPrefix = `[AI][${traceId}][enhance-pro-sum]`;
+
   try {
-    const { userContent } = req.body;
-    const model = process.env.OPENAI_MODEL;
-    if (!userContent) {
-      return res.status(400).json({ message: 'User content is required' })
+    const model = process.env.OPENAI_MODEL || process.env.QWEN_MODEL;
+    console.log(`${logPrefix} received, inputLength=${safeContent.length}`);
+
+    if (!safeContent) {
+      return res.status(400).json({ message: 'User content is required', traceId })
     }
-    // 因为model的类型是string|undefined，而sdk的model参数不接受undefinded
-    //设置前置条件判定，避免undefined传入
     if (!model) {
-      return res.status(500).json({ message: 'OPENAI_MODEL is not configured' })
+      return res.status(500).json({ message: 'OPENAI_MODEL is not configured', traceId })
     }
+
+    console.log(`${logPrefix} calling model=${model}, timeoutMs=${PRO_SUMMARY_TIMEOUT_MS}, maxTokens=${PRO_SUMMARY_MAX_TOKENS}`);
+    const controller = new AbortController();
+    const timeoutMs = Number.isFinite(PRO_SUMMARY_TIMEOUT_MS) ? PRO_SUMMARY_TIMEOUT_MS : 25000;
+    const timeoutHandle = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
 
     const response = await ai.chat.completions.create({
       model: model as string,
       messages: [
-        { role: 'system', content: 'You are an expert in resume writing. Your task is to enhance the professional summary of a resume. The summary should be 1-2 sentences also highlighting key skills, experience, and career objectives. Make it compelling and ATS-friendly. and only return text no options or anything else.' },
-        { role: 'user', content: userContent }
-      ]
-    })
-
-    const enhancedSummary = response?.choices?.[0]?.message?.content || "生成失败，请稍后重试";
-    return res.status(200).json({ enhancedSummary })
+        { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+        { role: 'user', content: safeContent }
+      ],
+      max_tokens: Number.isFinite(PRO_SUMMARY_MAX_TOKENS) ? PRO_SUMMARY_MAX_TOKENS : 140,
+      temperature: 0.3
+    }, {
+      signal: controller.signal
+    }).finally(() => {
+      clearTimeout(timeoutHandle);
+    });
+    const content = response?.choices?.[0]?.message?.content?.trim();
+    const enhancedSummary = content || fallbackSummary;
+    console.log(`${logPrefix} ai response received, contentLength=${content?.length || 0}, fallbackUsed=${!content}`);
+    return res.status(200).json({ enhancedSummary, fromFallback: !content, traceId })
 
   } catch (error) {
+    const err = error as { code?: string; status?: number; name?: string; message?: string };
+    console.error(`${logPrefix} error detail`, {
+      code: err?.code,
+      status: err?.status,
+      name: err?.name,
+      message: err?.message
+    });
+
+    if (isAiTimeoutError(error)) {
+      console.warn(`${logPrefix} timeout, fallback returned`);
+      return res.status(200).json({ enhancedSummary: fallbackSummary, fromFallback: true, traceId })
+    }
+
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return res.status(400).json({ message })
+    console.error(`${logPrefix} failed, message=${message}`);
+    return res.status(400).json({ message, enhancedSummary: fallbackSummary, fromFallback: true, traceId })
   }
 }
 
+// controller for streaming enhanced professional summary
+// POST: /api/ai/enhance-pro-sum-stream
+export const enhanceProfessionalSummaryStream = async (req: AuthRequest, res: Response) => {
+  const traceId = getTraceId(req);
+  const { userContent } = req.body;
+  const safeContent = normalizeSummaryInput(String(userContent || ''));
+  const fallbackSummary = buildSummaryFallback(safeContent);
+  const logPrefix = `[AI][${traceId}][enhance-pro-sum-stream]`;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  writeSseHeaders(res);
+
+  try {
+    const model = process.env.OPENAI_MODEL || process.env.QWEN_MODEL;
+    console.log(`${logPrefix} received, inputLength=${safeContent.length}`);
+
+    if (!safeContent) {
+      sendSseEvent(res, 'error', { message: 'User content is required', traceId });
+      return res.end();
+    }
+    if (!model) {
+      sendSseEvent(res, 'error', { message: 'OPENAI_MODEL is not configured', traceId });
+      return res.end();
+    }
+
+    const controller = new AbortController();
+    const timeoutMs = Number.isFinite(PRO_SUMMARY_TIMEOUT_MS) ? PRO_SUMMARY_TIMEOUT_MS : 25000;
+    timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+    // 绑定断连开关到请求和响应上
+    bindAbortOnDisconnect(req, res, controller);
+
+    console.log(`${logPrefix} streaming started, model=${model}, timeoutMs=${timeoutMs}`);
+    const stream = await ai.chat.completions.create({
+      model: model as string,
+      messages: [
+        { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+        { role: 'user', content: safeContent }
+      ],
+      max_tokens: Number.isFinite(PRO_SUMMARY_MAX_TOKENS) ? PRO_SUMMARY_MAX_TOKENS : 140,
+      temperature: 0.3,
+      stream: true //核心参数，开启流式输出
+    }, {
+      signal: controller.signal
+    });
+
+    let enhancedSummary = '';
+    // stream:true SDK返回一个可异步迭代对象，是一个事件流，是一个对象，每个对象中的chunk中包含了【这一帧】SDK返回的delta(delta是SDK返回的，是流式输出的关键)
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta?.content || '';
+      if (!delta) continue;
+      enhancedSummary += delta;
+      sendSseEvent(res, 'chunk', { delta, traceId });
+    }
+
+    const finalText = enhancedSummary.trim() || fallbackSummary;
+    sendSseEvent(res, 'done', {
+      result: finalText,
+      fromFallback: !enhancedSummary.trim(),
+      traceId
+    });
+    return res.end();
+  } catch (error) {
+    const err = error as { code?: string; status?: number; name?: string; message?: string };
+    console.error(`${logPrefix} stream error detail`, {
+      code: err?.code,
+      status: err?.status,
+      name: err?.name,
+      message: err?.message
+    });
+
+    if (isAiTimeoutError(error)) {
+      sendSseEvent(res, 'chunk', { delta: fallbackSummary, traceId });
+      sendSseEvent(res, 'done', { result: fallbackSummary, fromFallback: true, traceId });
+      return res.end();
+    }
+
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    sendSseEvent(res, 'error', { message, traceId });
+    // 在普通请求，如上面的非流式输出版本，使用res.status(200).json({...})告诉浏览器结束了
+    // 但是在流式输出时，我么必须用res.end()告诉浏览器结束了，在aiRoutes.ts中的监听器才能监听到'finish'事件执行后续逻辑
+    return res.end();
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
 // controller for enhancing a resume's job description
 // POST: /api/ai/enhance-job-desc
 export const enhanceJobDescription = async (req: AuthRequest, res: Response) => {
@@ -44,30 +270,113 @@ export const enhanceJobDescription = async (req: AuthRequest, res: Response) => 
     if (!userContent) {
       return res.status(400).json({ message: 'Missing required fields' })
     }
-    const model = process.env.OPENAI_MODEL;
+    const model = process.env.OPENAI_MODEL || process.env.QWEN_MODEL;
     if (!model) {
       return res.status(500).json({ message: 'OPENAI_MODEL is not configured' })
     }
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), JOB_DESC_TIMEOUT_MS);
 
     const response = await ai.chat.completions.create({
       model: model as string,
       messages: [
         {
           role: "system",
-          content: "You are an expert in resume writing. Your task is to enhance the job description of a resume. The job description should be only in 1-2 sentence also highlighting key responsibilities and achievements. Use action verbs and quantifiable results where possible. Make it ATS-friendly. and only return text no options or anything else."
+          content: JOB_DESC_SYSTEM_PROMPT
         },
         {
           role: "user",
           content: userContent,
         },
       ],
-    })
+    }, {
+      signal: controller.signal
+    }).finally(() => {
+      clearTimeout(timeoutHandle);
+    });
 
     const enhancedContent = response.choices[0].message.content;
     return res.status(200).json({ enhancedContent })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return res.status(400).json({ message: message })
+  }
+}
+
+// controller for streaming enhanced job description
+// POST: /api/ai/enhance-job-desc-stream
+export const enhanceJobDescriptionStream = async (req: AuthRequest, res: Response) => {
+  const traceId = getTraceId(req);
+  const logPrefix = `[AI][${traceId}][enhance-job-desc-stream]`;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  writeSseHeaders(res);
+
+  try {
+    const { userContent } = req.body;
+    const safeContent = normalizeSummaryInput(String(userContent || ''));
+
+    if (!safeContent) {
+      sendSseEvent(res, 'error', { message: 'Missing required fields', traceId });
+      return res.end();
+    }
+
+    const model = process.env.OPENAI_MODEL || process.env.QWEN_MODEL;
+    if (!model) {
+      sendSseEvent(res, 'error', { message: 'OPENAI_MODEL is not configured', traceId });
+      return res.end();
+    }
+
+    const fallbackSummary = buildSummaryFallback(safeContent);
+    const controller = new AbortController();
+    timeoutHandle = setTimeout(() => controller.abort(), JOB_DESC_TIMEOUT_MS);
+
+    bindAbortOnDisconnect(req, res, controller);
+
+    console.log(`${logPrefix} streaming started, model=${model}, timeoutMs=${JOB_DESC_TIMEOUT_MS}`);
+    const stream = await ai.chat.completions.create({
+      model: model as string,
+      messages: [
+        {
+          role: "system",
+          content: JOB_DESC_SYSTEM_PROMPT
+        },
+        {
+          role: "user",
+          content: safeContent,
+        },
+      ],
+      stream: true
+    }, {
+      signal: controller.signal
+    });
+
+    let enhancedContent = '';
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta?.content || '';
+      if (!delta) continue;
+      enhancedContent += delta;
+      sendSseEvent(res, 'chunk', { delta, traceId });
+    }
+
+    const finalText = enhancedContent.trim() || fallbackSummary;
+    sendSseEvent(res, 'done', { result: finalText, fromFallback: !enhancedContent.trim(), traceId });
+    return res.end();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`${logPrefix} stream failed, message=${message}`);
+
+    if (isAiTimeoutError(error)) {
+      sendSseEvent(res, 'error', { message: 'AI request timeout', traceId });
+      return res.end();
+    }
+
+    sendSseEvent(res, 'error', { message, traceId });
+    return res.end();
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
   }
 }
 
@@ -79,7 +388,7 @@ export const uploadResume = async (req: AuthRequest, res: Response) => {
 
     const { resumeText, title } = req.body;
     const userId = req.userId;
-    const model = process.env.OPENAI_MODEL;
+    const model = process.env.OPENAI_MODEL || process.env.QWEN_MODEL;
     if (!model) {
       return res.status(500).json({ message: 'OPENAI_MODEL is not configured' })
     }
@@ -91,53 +400,39 @@ export const uploadResume = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Resume text is empty. Please upload a text-based PDF.' })
     }
 
-    const systemPrompt = "You are an expert AI Agent to extract data from resume."
+    const cleanedResumeText = prepareResumeTextForExtraction(String(resumeText));
+    if (!cleanedResumeText) {
+      return res.status(400).json({ message: 'Resume text is empty after cleanup.' })
+    }
 
-    const userPrompt = `extract data from this resume: ${resumeText}
-      
-      Provide data in the following JSON format with no additional text before or after:
+    const systemPrompt = '你是一个专业的简历数据提取专家。请从文本中提取结构化信息，要求:1. 严格输出 JSON 格式，不含任何解释或 Markdown 标签。2. 保持字段精简，若某项缺失则返回空字符串或空数组。3. 纠正文本中明显的扫描错误（如“泻染”纠正为“渲染”）。'
 
-      {
-      professional_summary: { type: String, default: '' },
-      skills: [{ type: String }],
-      personal_info: {
-          image: {type: String, default: '' },
-          full_name: {type: String, default: '' },
-          profession: {type: String, default: '' },
-          email: {type: String, default: '' },
-          phone: {type: String, default: '' },
-          location: {type: String, default: '' },
-          linkedin: {type: String, default: '' },
-          website: {type: String, default: '' },
-      },
-      experience: [
-          {
-              company: { type: String },
-              position: { type: String },
-              start_date: { type: String },
-              end_date: { type: String },
-              description: { type: String },
-              is_current: { type: Boolean },
-          }
-      ],
-      project: [
-          {
-              name: { type: String },
-              type: { type: String },
-              description: { type: String },
-          }
-      ],
-      education: [
-          {
-              institution: { type: String },
-              degree: { type: String },
-              field: { type: String },
-              graduation_date: { type: String },
-              gpa: { type: String },
-          }
-      ],          
-      }
+    const userPrompt = `请提取以下简历内容：
+[简历文本开始]
+${cleanedResumeText}
+[简历文本结束]
+
+输出格式严格参考此 JSON 样例：
+{
+  "personal_info": {
+    "full_name": "", "profession": "", "email": "", "phone": "", "location": "", "website": ""
+  },
+  "skills": [],
+  "education": [
+    {"institution": "", "degree": "", "field": "", "graduation_date": "", "gpa": ""}
+  ],
+  "experience": [
+    {"company": "", "position": "", "start_date": "", "end_date": "", "description": "", "is_current": false}
+  ],
+  "projects": [
+    {"name": "", "type": "", "description": ""}
+  ],
+  "professional_summary": ""
+}
       `;
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), UPLOAD_RESUME_TIMEOUT_MS);
 
     const response = await ai.chat.completions.create({
       model: model as string,
@@ -152,7 +447,11 @@ export const uploadResume = async (req: AuthRequest, res: Response) => {
         },
       ],
       response_format: { type: 'json_object' }
-    })
+    }, {
+      signal: controller.signal
+    }).finally(() => {
+      clearTimeout(timeoutHandle);
+    });
 
     const extractedData = response.choices[0].message.content;
     if (!extractedData) {

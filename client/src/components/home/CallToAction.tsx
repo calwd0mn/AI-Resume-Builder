@@ -1,5 +1,3 @@
-import React from 'react'
-
 const CallToAction = () => {
   return (
     <div id="cta" className='border-y border-dashed border-slate-200 w-full max-w-5xl mx-auto px-10 sm:px-16'>

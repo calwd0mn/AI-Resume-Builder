@@ -5,10 +5,9 @@ import { Plus, Trash2 } from 'lucide-react'
 type EducationFormProps = {
   data: ResumeData['education']
   setEducation: React.Dispatch<React.SetStateAction<ResumeData['education']>>
-  onSaveChanges: () => void
 }
 
-const EducationForm = ({ data, setEducation, onSaveChanges }: EducationFormProps) => {
+const EducationForm = ({ data, setEducation }: EducationFormProps) => {
 
   const addEducation = () => {
     const newEducation: Education = {
@@ -94,13 +93,6 @@ const EducationForm = ({ data, setEducation, onSaveChanges }: EducationFormProps
           </div>
         </div>
       ))}
-
-      <button
-        className='h-11 bg-gradient-to-br from-green-100 to-green-200 border border-green-300 text-green-600 hover:ring transition-all px-4 py-1.5 rounded-lg'
-        onClick={onSaveChanges}
-      >
-        Save Changes
-      </button>
     </div>
   )
 }

@@ -89,9 +89,14 @@ export const updateResumeById = async (req: AuthRequest, res: Response) => {
           pre: 'w-300,h-300,fo-face,z-0.75' + (removeBackground ? ',e-bgremove' : '')
         }
       });
-      resumeDataCopy.personal_info = response.url
+      resumeDataCopy.personal_info = resumeDataCopy.personal_info || {};
+      resumeDataCopy.personal_info.image = response.url;
     }
-    const resume = await Resume.findByIdAndUpdate({ userId, _id: resumeId }, resumeDataCopy, { new: true });
+    const resume = await Resume.findOneAndUpdate(
+      { userId, _id: resumeId },
+      resumeDataCopy,
+      { returnDocument: 'after' }
+    );
 
     return res.status(200).json({ message: 'Resume updated successfully', resume })
 

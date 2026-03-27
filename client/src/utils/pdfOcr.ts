@@ -2,23 +2,47 @@
  * 从 PDF 提取文本：优先直接取字，失败或内容过少时用 OCR（支持扫描版简历）
  */
 import pdfToText from 'react-pdftotext'
-import * as pdfjsLib from 'pdfjs-dist'
-import { createWorker } from 'tesseract.js'
 
 const MIN_TEXT_LENGTH = 80 // 低于此长度视为扫描版，走 OCR
 
-// PDF.js 需在浏览器中指定 worker（Vite 下用 CDN 或 public 下的 worker）
-if (typeof window !== 'undefined') {
-  const pdfjsWorker = (pdfjsLib as unknown as { GlobalWorkerOptions: { workerSrc: string } }).GlobalWorkerOptions
-  if (!pdfjsWorker.workerSrc) {
-    pdfjsWorker.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${(pdfjsLib as unknown as { version: string }).version}/pdf.worker.min.mjs`
+let pdfWorkerConfigured = false
+
+type PdfRenderTask = { promise: Promise<void> }
+type PdfViewport = { width: number; height: number }
+type PdfPage = {
+  getViewport: (opts: { scale: number }) => PdfViewport
+  render: (opts: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport }) => PdfRenderTask
+}
+type PdfDocument = { numPages: number; getPage: (pageNum: number) => Promise<PdfPage> }
+type PdfjsLib = {
+  GlobalWorkerOptions: { workerSrc: string }
+  version: string
+  getDocument: (src: { data: ArrayBuffer }) => { promise: Promise<PdfDocument> }
+}
+
+async function getPdfjsLib() {
+  const pdfjsLib = await import('pdfjs-dist')
+  const typedPdfjsLib = pdfjsLib as unknown as PdfjsLib
+
+  // PDF.js 需在浏览器中指定 worker（Vite 下用 CDN 或 public 下的 worker）
+  if (typeof window !== 'undefined' && !pdfWorkerConfigured) {
+    if (!typedPdfjsLib.GlobalWorkerOptions.workerSrc) {
+      typedPdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${typedPdfjsLib.version}/pdf.worker.min.mjs`
+    }
+    pdfWorkerConfigured = true
   }
+
+  return typedPdfjsLib
 }
 
 /**
  * 用 OCR 从 PDF 各页画布识别文字（用于扫描版 PDF）
  */
 async function extractTextByOcr(pdfFile: File): Promise<string> {
+  const [{ createWorker }, pdfjsLib] = await Promise.all([
+    import('tesseract.js'),
+    getPdfjsLib(),
+  ])
   const arrayBuffer = await pdfFile.arrayBuffer()
   const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer })
   const pdf = await loadingTask.promise
