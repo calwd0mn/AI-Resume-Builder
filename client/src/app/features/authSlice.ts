@@ -21,7 +21,6 @@ type LoginPayload = {
 const initialState: AuthState = {
   token: null,
   user: null,
-  // 是否登录
   isAuthenticated: false,
   loading: true,
 }

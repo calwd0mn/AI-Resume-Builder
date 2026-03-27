@@ -10,9 +10,6 @@ const Login = () => {
 
   const dispatch = useDispatch()
   const query = new URLSearchParams(window.location.search)
-  //URLSearchParams是一个类，用来操作URL中的查询字符串
-  //window.location.search是一个字符串，表示当前页面的查询字符串
-  //get 查询?后面"state"的值，如localhost:xxxx/login?state=signup
   const urlState = query.get("state")
   const [state, setState] = React.useState(urlState || "login")
 
@@ -21,9 +18,6 @@ const Login = () => {
     email: '',
     password: ''
   })
-  // const 变量名：类型 = 初始值
-  // React.SubmitEventHandler：接受FormEvent并且没有返回值的函数
-  // <HTMLFormElement>：泛型参数，这个事件绑定在<form>中
   const handleSubmit: React.SubmitEventHandler<HTMLFormElement> = async (e) => {
     e.preventDefault()
     try {
@@ -32,9 +26,6 @@ const Login = () => {
       localStorage.setItem('token', data.token)
       toast.success(data.message)
     } catch (error: unknown) {
-      // TS的catch默认是unknown，不能直接访问error.message/response
-      // 通过axios的判断，如果是网络请求的错误，优先返回后端的业务错误，没有就返回axios的网络错误
-      // 如果是代码逻辑的错误，返回error.message
       const message = axios.isAxiosError(error)
         ? (error.response?.data?.message ?? error.message)
         : (error instanceof Error ? error.message : 'Request failed')
@@ -44,10 +35,6 @@ const Login = () => {
 
   const handleChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const { name, value } = e.target
-    // 复习：React中，判断页面是否要更新靠的是浅比较，即对比地址
-    // 修改内容，数组/对象 地址没变，不更新
-    // 所以我们要通过返回新数组的方法进行修改
-    // ...prev解构,[key]:value 赋值，不丢失信息
     setFormData(prev => ({ ...prev, [name]: value }))
   }
   return (

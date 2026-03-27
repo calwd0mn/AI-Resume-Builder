@@ -15,7 +15,6 @@ const ResumeBuilder = lazy(() => import('./pages/ResumeBuilder'))
 const Preview = lazy(() => import('./pages/Preview'))
 
 function App({ }: AppProps) {
-  // 获取dispatch发送动作(action)
   const dispatch = useDispatch()
 
   const getUserData = async () => {
@@ -41,7 +40,6 @@ function App({ }: AppProps) {
 
   return (
     <>
-      {/* 添加路由 */}
       <Toaster />
       <Suspense fallback={<div className='p-4 text-sm text-slate-500'>Loading...</div>}>
         <Routes>

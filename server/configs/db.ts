@@ -19,7 +19,6 @@ const connectDB = async (): Promise<void> => {
     await mongoose.connect(`${mongodbURL}/${projectName}`);
   } catch (error) {
     console.error('Error connecting to MongoDB', error);
-    // 数据库未连通时不应继续提供 API，避免请求在模型层超时
     process.exit(1);
   }
 };

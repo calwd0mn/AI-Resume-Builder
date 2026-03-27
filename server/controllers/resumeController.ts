@@ -18,7 +18,6 @@ export const createResume = async (req: AuthRequest, res: Response) => {
       userId,
       title,
     })
-    // response 必须从 express 显式导入，不然status会与浏览器默认的全局类型冲突
     return res.status(201).json({ message: 'Resume created successfully', resume: newResume })
 
 
@@ -34,9 +33,6 @@ export const createResume = async (req: AuthRequest, res: Response) => {
 export const deleteResume = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
-    // 通过路由传入的resumeId来删除简历 
-    // 路由中的/:resumeId 是路由参数，通过req.params.resumeId 获取
-    // 冒号是关键，表示这是一个路由参数
     const { resumeId } = req.params;
 
     await Resume.findOneAndDelete({ userId, _id: resumeId })
@@ -55,7 +51,6 @@ export const getResumeById = async (req: AuthRequest, res: Response) => {
     const userId = req.userId;
     const { resumeId } = req.params;
 
-    // select('-__v -createdAt -updatedAt') 表示排除 __v、createdAt、updatedAt 字段，以达到不传递给前端的效果，类似前面的undefined
     const resume = await Resume.findOne({ userId, _id: resumeId }).select('-__v -createdAt -updatedAt');
     if (!resume) {
       return res.status(404).json({ message: 'Resume not found' })

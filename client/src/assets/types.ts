@@ -40,7 +40,7 @@ export interface Education {
     degree: string;
     field: string;
     graduation_date: string;
-    gpa?: string; // GPA 在国内非必填，设为可选
+    gpa?: string;
     id: string;
 }
 
@@ -62,11 +62,10 @@ export interface ResumeData {
         phone: string;
         location: string;
         profession: string;
-        image: any; // 这里的 image 是 import 进来的图片资源
-        // --- 扩展中国简历字段 ---
-        gender?: string;        // 性别
-        age?: number;           // 年龄
-        political_status?: string; // 政治面貌
+        image: any;
+        gender?: string;
+        age?: number;
+        political_status?: string;
         job_intention: string;
         website?: string;
         linkedin?: string;

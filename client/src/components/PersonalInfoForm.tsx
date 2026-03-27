@@ -8,25 +8,18 @@ type PersonalInfoFormProps = {
   data: ResumeData['personal_info']
   onChange: (next: ResumeData['personal_info']) => void
   removeBackground: boolean
-  // 要将setState作为Props传递给子组件时（该setState在父组件中定义）必须定义他的类型，可以鼠标悬停在setState上查看类型
-  //Dispatch是派发器，用作接受一个动作并触发状态更新
-  //SetStateAction是状态更新的类型（动作）
-  //<泛型>用来指定状态的类型，这里是boolean
-  //professionSummmary中有同样的情况
   setRemoveBackground: Dispatch<SetStateAction<boolean>>
 }
 
 function PersonalInfoForm({ data, onChange, removeBackground, setRemoveBackground }: PersonalInfoFormProps) {
 
   const handleChange = (
-    // 获取对象类型的所有键，并合并成一个联合类型
     field: keyof ResumeData['personal_info'],
     value: any
   ) => {
     const next = { ...data, [field]: value }
     onChange(next)
   }
-  // 个人信息我们提供6个字段，分别是全名、邮箱、电话、地址、个人网站和求职意向，每个字段都有对应的图标和输入类型
   const fields = [
     { key: "full_name", label: "Full Name", icon: User, type: "text", required: true },
     { key: "email", label: "Email Address", icon: Mail, type: "email", required: true },
@@ -35,7 +28,6 @@ function PersonalInfoForm({ data, onChange, removeBackground, setRemoveBackgroun
     { key: "website", label: "Personal Website", icon: Globe, type: "url" },
     { key: "job_intention", label: "Job Intention", icon: BriefcaseBusiness, type: "text" },
   ]
-  //后续需添加自定义功能:开启或者关闭个人信息图标显示
 
 
   return (

@@ -1,9 +1,8 @@
 /**
- * 从 PDF 提取文本：优先直接取字，失败或内容过少时用 OCR（支持扫描版简历）
  */
 import pdfToText from 'react-pdftotext'
 
-const MIN_TEXT_LENGTH = 80 // 低于此长度视为扫描版，走 OCR
+const MIN_TEXT_LENGTH = 80
 
 let pdfWorkerConfigured = false
 
@@ -24,7 +23,6 @@ async function getPdfjsLib() {
   const pdfjsLib = await import('pdfjs-dist')
   const typedPdfjsLib = pdfjsLib as unknown as PdfjsLib
 
-  // PDF.js 需在浏览器中指定 worker（Vite 下用 CDN 或 public 下的 worker）
   if (typeof window !== 'undefined' && !pdfWorkerConfigured) {
     if (!typedPdfjsLib.GlobalWorkerOptions.workerSrc) {
       typedPdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${typedPdfjsLib.version}/pdf.worker.min.mjs`
@@ -36,7 +34,6 @@ async function getPdfjsLib() {
 }
 
 /**
- * 用 OCR 从 PDF 各页画布识别文字（用于扫描版 PDF）
  */
 async function extractTextByOcr(pdfFile: File): Promise<string> {
   const [{ createWorker }, pdfjsLib] = await Promise.all([
@@ -50,7 +47,6 @@ async function extractTextByOcr(pdfFile: File): Promise<string> {
   const scale = 2
   const texts: string[] = []
 
-  // 支持英文与简体中文简历
   const worker = await createWorker(['eng', 'chi_sim'])
 
   try {
@@ -80,8 +76,6 @@ async function extractTextByOcr(pdfFile: File): Promise<string> {
 export type ExtractResult = { text: string; usedOcr: boolean }
 
 /**
- * 从 PDF 提取全文。先尝试直接取字，若为空或过短则用 OCR。
- * @param onOcrStart 在开始 OCR 时调用（可用于显示“正在识别…”提示）
  */
 export async function extractTextFromPdfWithOcrFallback(
   pdfFile: File,

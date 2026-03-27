@@ -14,7 +14,6 @@ import axios from 'axios'
 import toast from 'react-hot-toast'
 
 type DraftKeys = 'professional_summary' | 'experience' | 'education' | 'project' | 'skills' | 'personal_info'
-//Partial<Pick<ResumeData, DraftKeys>> 表示 ResumeDrafts 是 ResumeData 的子集，且只包含 DraftKeys 中的键，partial将获取的属性变为可选属性
 type ResumeDrafts = Partial<Pick<ResumeData, DraftKeys>>
 
 const PersonalInfoForm = lazy(() => import('../components/PersonalInfoForm'))
@@ -73,7 +72,6 @@ const ResumeBuilder = () => {
   const activeSection = sections[activeSectionIndex]
   const [drafts, setDrafts] = useState<ResumeDrafts>({})
   const [isSaving, setIsSaving] = useState(false)
-  /** 当前打开的 dropdown：'template' | 'color' | null，保证同一时间只开一个 */
   const [activeDropdown, setActiveDropdown] = useState<'template' | 'color' | null>(null)
 
   const setDraftField = <K extends keyof ResumeDrafts>(key: K, value: ResumeDrafts[K]) => {
@@ -96,13 +94,9 @@ const ResumeBuilder = () => {
       return { ...prev, [key]: next }
     })
   }
-  /** 当前“真实数据 + 所有草稿”合并结果，与预览一致，用于上传 */
   const getMergedResumeData = (): ResumeData => ({ ...resumeData, ...drafts } as ResumeData)
 
   /**
-   * 将简历数据持久化到后端。
-   * @param data 可选；不传则用当前 resumeData，传则用合并后的数据（用于 Save Changes 时带上草稿）
-   * @returns 是否保存成功
    */
   const saveResume = async (data?: ResumeData): Promise<boolean> => {
     if (!resumeId) {
@@ -113,11 +107,9 @@ const ResumeBuilder = () => {
     try {
       const updatedResumeData = structuredClone(toSave) as ResumeData
       // remove image from updatedResumeData
-      // 原因：JSON吞不下文件，如果image是一个File或者Blob对象，JSON解析后会变成一个空对象
       if (typeof toSave.personal_info.image === 'object') {
         delete updatedResumeData.personal_info.image
       }
-      // FormData可以携带string和二进制文件
       const formData = new FormData()
       formData.append('resumeId', resumeId)
       formData.append('resumeData', JSON.stringify(updatedResumeData))
@@ -144,7 +136,6 @@ const ResumeBuilder = () => {
     })
   }
 
-  // 每个 section 离开时要丢弃的草稿字段
   const sectionDraftKeys: Record<string, Array<keyof ResumeDrafts>> = {
     personal: ['personal_info'],
     summary: ['professional_summary'],
@@ -171,7 +162,6 @@ const ResumeBuilder = () => {
 
 
 
-  /** Save Changes 按钮：先合并草稿再上传到数据库，成功则清空当前 section 草稿 */
   const handleSaveChanges = async () => {
     const merged = getMergedResumeData()
     setIsSaving(true)
@@ -199,7 +189,6 @@ const ResumeBuilder = () => {
     <ActiveSectionContext.Provider value={activeSection.id}>
       <div>
         <div className='max-w-7xl mx-auto px-4 py-7'>
-          {/* inline-flex 设置为行内块元素，通常用于按钮的文字和icon一起需要同行显示时 */}
           <Link to={`/app`} className='inline-flex items-center gap-2 text-slate-500 hover:text-slate-700 transition-all'>
             <ArrowLeftIcon className='size-4' />Back to Dashboard
           </Link>
@@ -207,8 +196,6 @@ const ResumeBuilder = () => {
         <div className='max-w-7xl mx-auto px-4 py-7'>
           <div className='grid lg:grid-cols-12 gap-8'>
             {/* Lefr Panel - Form */}
-            {/* lg:col-span-5 在大屏上占据5/12 */}
-            {/* overflow-hidden，超出的隐藏，可以适配圆角 */}
             <div className='relative lg:col-span-5 rounded-lg overflow-hidden'>
               <div className='bg-white rounded-lg shadow-sm border border-gray-200 p-5 pt-1'>
 
@@ -221,7 +208,6 @@ const ResumeBuilder = () => {
                     <TemplateSelector selectedTemplate={resumeData.template} setTemplate={(template) => setResumeData(prev => ({ ...prev, template: template }))} isOpen={activeDropdown === 'template'} setIsOpen={(open) => setActiveDropdown(open ? 'template' : null)} />
                     <ColorSeclector selectedColor={resumeData.accent_color} setColor={(color) => setResumeData(prev => ({ ...prev, accent_color: color }))} isOpen={activeDropdown === 'color'} setIsOpen={(open) => setActiveDropdown(open ? 'color' : null)} />
                   </div>
-                  {/* ml-auto可以吃掉所有剩余的空间用作左外边距，可用来实现推到底(右)端 */}
                   <div className='ml-auto flex items-center gap-1 '>
                     {activeSectionIndex !== 0 ? (
                       <button onClick={() => switchSection(Math.max(activeSectionIndex - 1, 0))} className=' flex items-center gap-1 p-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all' disabled={activeSectionIndex === 0}>

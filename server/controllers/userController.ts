@@ -6,8 +6,6 @@ import jwt from 'jsonwebtoken';
 import { AuthRequest } from '../middlewares/authMiddleware';
 
 
-// 报错1修复：用 ! 非空断言告诉 TS 该环境变量一定存在，
-// 或者在运行时提前校验（更推荐后者，这里用断言简洁处理）
 const generateToken = (userId: string): string => {
   return jwt.sign({ userId }, process.env.JWT_SECRET!, { expiresIn: '7d' });
 }
@@ -34,14 +32,11 @@ export const registerUser = async (req: Request, res: Response) => {
       name, email, password: hashedPassword
     })
 
-    // 报错2修复：ObjectId → string，用 .toString() 转换
     const token = generateToken(newUser._id.toString())
-    // 确保hash不会被传到前端
     newUser.password = undefined;
 
     return res.status(201).json({ message: 'User created successfully', token, user: newUser })
 
-    // 报错3修复：catch 的 error 类型为 unknown，需要先判断类型再访问属性
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return res.status(500).json({ message })

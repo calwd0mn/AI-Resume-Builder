@@ -86,11 +86,11 @@ const prepareResumeTextForExtraction = (input: string): string => {
 
 const writeSseHeaders = (res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');// 禁止缓存和转换
-  res.setHeader('Connection', 'keep-alive');// 不要掐断
-  res.setHeader('X-Accel-Buffering', 'no');// 禁止Nginx缓存（为后续部署在服务器时考虑）
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   if (typeof (res as any).flushHeaders === 'function') {
-    (res as any).flushHeaders();// 把头先返回去
+    (res as any).flushHeaders();
   }
 };
 
@@ -202,7 +202,6 @@ export const enhanceProfessionalSummaryStream = async (req: AuthRequest, res: Re
     const controller = new AbortController();
     const timeoutMs = Number.isFinite(PRO_SUMMARY_TIMEOUT_MS) ? PRO_SUMMARY_TIMEOUT_MS : 25000;
     timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-    // 绑定断连开关到请求和响应上
     bindAbortOnDisconnect(req, res, controller);
 
     console.log(`${logPrefix} streaming started, model=${model}, timeoutMs=${timeoutMs}`);
@@ -214,13 +213,12 @@ export const enhanceProfessionalSummaryStream = async (req: AuthRequest, res: Re
       ],
       max_tokens: Number.isFinite(PRO_SUMMARY_MAX_TOKENS) ? PRO_SUMMARY_MAX_TOKENS : 140,
       temperature: 0.3,
-      stream: true //核心参数，开启流式输出
+      stream: true
     }, {
       signal: controller.signal
     });
 
     let enhancedSummary = '';
-    // stream:true SDK返回一个可异步迭代对象，是一个事件流，是一个对象，每个对象中的chunk中包含了【这一帧】SDK返回的delta(delta是SDK返回的，是流式输出的关键)
     for await (const chunk of stream) {
       const delta = chunk.choices?.[0]?.delta?.content || '';
       if (!delta) continue;
@@ -252,8 +250,6 @@ export const enhanceProfessionalSummaryStream = async (req: AuthRequest, res: Re
 
     const message = error instanceof Error ? error.message : 'Unknown error';
     sendSseEvent(res, 'error', { message, traceId });
-    // 在普通请求，如上面的非流式输出版本，使用res.status(200).json({...})告诉浏览器结束了
-    // 但是在流式输出时，我么必须用res.end()告诉浏览器结束了，在aiRoutes.ts中的监听器才能监听到'finish'事件执行后续逻辑
     return res.end();
   } finally {
     if (timeoutHandle) {

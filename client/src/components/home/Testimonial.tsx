@@ -5,14 +5,11 @@ interface cardData {
   name: string;
   handle: string;
 }
-// 通常需要定义专门的接口
 interface CreateCardProps {
   card: cardData;
 }
 
-//可以使用
 //const CreateCard = ({ card }: { card: cardData }) => (...)
-//最好使用参数接口形式
 const CreateCard = ({ card }: CreateCardProps) => (
   <div className="p-4 rounded-lg mx-4 shadow hover:shadow-lg transition-all duration-200 w-72 shrink-0">
     <div className="flex gap-2">

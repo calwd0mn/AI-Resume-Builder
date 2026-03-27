@@ -41,7 +41,6 @@ function TemplateSelector({ selectedTemplate, setTemplate, isOpen, setIsOpen }: 
 
         {isOpen && (
           <>
-            {/* 遮罩先渲染、z-10，点击关闭；下拉内容 z-20 在其之上，保证点击模板能触发 setTemplate */}
             <div className="fixed inset-0 z-10 cursor-default" onClick={() => setIsOpen(false)} />
             <div className="flex flex-col gap-2 absolute left-0 mt-2 w-75 bg-white border border-gray-200 rounded-lg shadow-lg z-20 p-2">
               {templates.map((template) => (

@@ -91,8 +91,6 @@ class SmoothTypewriter {
 const rawBaseUrl = import.meta.env.VITE_BASE_URL as string | undefined
 const normalizedBaseUrl = rawBaseUrl?.trim().replace(/^['"]|['"]$/g, '') || ''
 
-// endpoint 端点地址，用于构建请求URL，我们在后端定义的'/api/ai/...'这些
-// 归一化请求格式
 const buildRequestUrl = (endpoint: string) => {
   if (!normalizedBaseUrl) return endpoint
   const base = normalizedBaseUrl.endsWith('/') ? normalizedBaseUrl.slice(0, -1) : normalizedBaseUrl
@@ -100,8 +98,6 @@ const buildRequestUrl = (endpoint: string) => {
   return `${base}${path}`
 }
 
-// 创建跟踪ID，用于追踪请求和响应
-// crypto 原生web api，用于生成唯一的跟踪ID
 const createTraceId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -153,12 +149,10 @@ export const useSseEnhancer = () => {
   }: StartOptions<TPayload>) => {
     stop()
     const controller = new AbortController()
-    // 使用useRef保存abortcontroller，保证在函数执行期间不丢失
     abortRef.current = controller
     setIsStreaming(true)
 
     const traceId = createTraceId()
-    //当 fetch 请求初始化时，我们将 AbortSignal 作为一个选项传递进入请求的选项对象中（下面的 {signal}）。这将 signal 和 controller 与 fetch 请求相关联，并且允许我们通过调用 AbortController.abort() 去中止它
     const response = await fetch(buildRequestUrl(endpoint), {
       method: 'POST',
       headers: {

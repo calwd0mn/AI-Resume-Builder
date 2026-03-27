@@ -1,5 +1,5 @@
 // assets.ts
-import type { ResumeData } from './types'; // 导入的内容非代码变量，需要显式使用type关键字
+import type { ResumeData } from './types';
 
 import dummy_profile from './dummy_profile.png'
 

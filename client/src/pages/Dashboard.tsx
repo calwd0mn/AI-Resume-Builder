@@ -38,9 +38,6 @@ const Dashboard = () => {
       toast.error(message)
     }
   }
-  // 此处复习一下useEffect，useEffect会在组件挂载后执行，相当于componentDidMount
-  // 第二个参数是依赖项，如果不选则每次组件渲染都会执行，如果选则只有依赖项发生变化时才会执行，此处我们用空数组表示只执行一次
-  // useState将allResumes数据拷贝存储在组件状态中，避免直接修改原始数据导致无法触发渲染
   useEffect(() => {
     loadAllResumes()
   }, [])
@@ -63,7 +60,6 @@ const Dashboard = () => {
     e.preventDefault();
     setIsLoading(true);
 
-    // 使用唯一的 ID 管理 Toast，避免堆叠
     const STATUS_TOAST_ID = 'resume-status';
 
     try {
@@ -73,7 +69,6 @@ const Dashboard = () => {
         return;
       }
 
-      // 1. PDF 提取阶段
       toast.loading('正在读取 PDF 内容...', { id: STATUS_TOAST_ID });
       const { extractTextFromPdfWithOcrFallback } = await import('../utils/pdfOcr');
       const { text: resumeText, usedOcr } = await extractTextFromPdfWithOcrFallback(resumeFile, () => {
@@ -85,7 +80,6 @@ const Dashboard = () => {
         return;
       }
 
-      // 2. API 调用阶段
       toast.loading(usedOcr ? 'OCR 已完成，正在由 AI 深度解析...' : '正在解析简历结构...', { id: STATUS_TOAST_ID });
 
       const { data } = await api.post(
@@ -93,13 +87,12 @@ const Dashboard = () => {
         { resumeText: resumeText.trim(), title },
         {
           headers: { Authorization: `Bearer ${token}` },
-          timeout: 60000 // 客户端显式设置 60s 超时
+          timeout: 60000
         }
       );
 
       toast.success('简历解析成功！正在进入编辑器...', { id: STATUS_TOAST_ID });
 
-      // 清理并跳转
       setTitle('');
       setResumeFile(null);
       setShowUploadResume(false);
@@ -141,13 +134,10 @@ const Dashboard = () => {
 
   }
   const deleteResume = async (resumeId: string) => {
-    // 添加确认窗口
     try {
       const confirm = window.confirm('Are you sure you want to delete this resume?')
       if (confirm) {
         const { data } = await api.delete(`/api/resumes/delete/${resumeId}`, { headers: { Authorization: `Bearer ${token}` } })
-        // 此处复习一下filter方法，filter方法会返回一个新数组，新数组中的元素是原数组中满足条件的元素
-        // 在React中，元素更新靠的是浅比较，即比较地址，所以我们要通过返回新数组的方式进行数据的修改触发渲染
         setAllResumes(allResumes.filter(resume => resume.id !== resumeId))
         toast.success(data.message)
       }
@@ -159,10 +149,7 @@ const Dashboard = () => {
   return (
     <div>
       <div className='max-w-7xl mx-auto px-4 py-8'>
-        {/* sm:hidden 只在手机端（小屏幕）显示 */}
         <p className='text-2xl font-medium mb-6 bg-gradient-to-r from-slate-600 to-slate-700 bg-clip-text text-transparent sm:hidden'>Welcome,{user?.name}</p>
-        {/* gap-4 需要配合布局如flex和grid，设置内部元素的间距 */}
-        {/* group 打破css中样式只能用于当前元素子集的限制，在父级加入group 子集加入group-action/focus/hover... 在父级触发时所有带标签的子集都做出反应*/}
         <div className='flex gap-4'>
           <button onClick={() => setShowCreateResume(true)} className='w-full bg-white sm:max-w-36 h-48 flex flex-col items-center justify-center rounded-lg gap-2 text-slate-600 border border-dashed border-slate-300 group hover:border-indigo-500 hover:shadow-lg transition-all duration-300 cursor-pointer'>
             <PlusIcon className='size-11 transition-all duration-300 p-2.5 bg-gradient-to-br from-indigo-300 to-indigo-500  text-white rounded-full' />
@@ -197,10 +184,8 @@ const Dashboard = () => {
           })}
         </div>
         <div>
-          {/* 如果showCreateResume为true 我们就渲染创建页面  */}
           {showCreateResume && (
             <form onSubmit={createResume} onClick={() => setShowCreateResume(false)} className='fixed inset-0 bg-black/70 backdrop-blur bg-opacity-50 z-10 flex items-center justify-center'>
-              {/* stopPropagation 阻止事件向上冒泡 将弹窗关闭*/}
               <div onClick={e => e.stopPropagation()} className='relative w-full max-w-sm bg-slate-50 rounded-lg p-6'>
                 <h2 className='text-xl font-boldd mb-4'>Create a Resume</h2>
                 <input onChange={(e) => setTitle(e.target.value)} value={title} type="text" placeholder='Enter Resume Title' className='w-full px-4 py-2 mb-4 border border-slate-200 rounded focus:ring-2 focus:border-green-600 focus:ring-green-600/50 outline-none' required />
@@ -213,7 +198,6 @@ const Dashboard = () => {
 
           {showUploadResume && (
             <form onSubmit={uploadResume} onClick={() => setShowUploadResume(false)} className='fixed inset-0 bg-black/70 backdrop-blur bg-opacity-50 z-10 flex items-center justify-center'>
-              {/* stopPropagation 阻止事件向上冒泡 将弹窗关闭*/}
               <div onClick={e => e.stopPropagation()} className='relative w-full max-w-sm bg-slate-50 rounded-lg p-6'>
                 <h2 className='text-xl font-boldd mb-4'>Upload Resume</h2>
                 <input onChange={(e) => setTitle(e.target.value)} value={title} type="text" placeholder='Enter Resume Title' className='w-full px-4 py-2 mb-4 border border-slate-200 rounded focus:ring-2 focus:border-green-600 focus:ring-green-600/50 outline-none' required />
@@ -231,8 +215,6 @@ const Dashboard = () => {
                       )}
                     </div>
                   </label>
-                  {/* hidden 隐藏原生input上传按钮 */}
-                  {/* files是一个FileList数组，包含用户选择的文件 */}
                   <input type="file" id='resume-input' accept='.pdf' hidden onChange={(e) => e.target.files && setResumeFile(e.target.files[0])} />
                 </div>
                 <button type="submit" disabled={isLoading} className='w-full py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed'>
