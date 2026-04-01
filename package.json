@@ -1,0 +1,26 @@
+{
+  "name": "ai-resume-ts",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "prepare": "husky",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "npm run lint:client",
+    "lint:client": "npm --prefix client run lint"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.1",
+    "prettier": "^3.6.2"
+  },
+  "lint-staged": {
+    "client/src/**/*.{js,jsx,ts,tsx}": [
+      "npm --prefix client exec eslint --fix",
+      "prettier --write"
+    ],
+    "client/**/*.{css,html,json,md}": "prettier --write",
+    "server/**/*.{ts,js,json,md}": "prettier --write",
+    "*.{md,json,yml,yaml}": "prettier --write"
+  }
+}

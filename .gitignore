@@ -11,3 +11,6 @@ server/.env
 # 忽略编辑器配置
 .vscode/
 .idea/
+
+# Husky / lint-staged / prettier 运行产物
+.husky/_
